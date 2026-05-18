@@ -1,0 +1,773 @@
+cells:
+  - kind: 2
+    value: "-- ============================================================\r
+
+      -- قاعدة بيانات نظام إدارة مساحات العمل المشتركة (نسخة معدلة)\r
+
+      -- التعديل: إزالة جدول ROOM_TYPE وتحديد نوع الغرفة (Individual/Group)\r
+
+      --          مباشرة في جدول ROOM مع إضافة BaseHourlyPrice و Capacity\r
+
+      -- ============================================================\r
+
+      \r
+
+      -- ============================================================\r
+
+      -- 1. إنشاء الجداول (بعد التعديل)\r
+
+      -- ============================================================\r
+
+      \r
+
+      -- 1.1 جدول WORKSPACE\r
+
+      CREATE TABLE WORKSPACE (\r
+
+      \    WorkspaceID       NUMBER(5) PRIMARY KEY,\r
+
+      \    WorkspaceName     VARCHAR2(100) NOT NULL,\r
+
+      \    GracePeriodMinutes NUMBER(3) DEFAULT 30 NOT NULL,\r
+
+      \    CancellationThresholdHours NUMBER(2) DEFAULT 2 NOT NULL,\r
+
+      \    DepositRatePercent NUMBER(3) DEFAULT 25 NOT NULL,\r
+
+      \    TaxRatePercent    NUMBER(5,2) DEFAULT 14.00 NOT NULL,\r
+
+      \    DepositPaymentWindowMinutes NUMBER(3) DEFAULT 15 NOT NULL\r
+
+      );\r
+
+      \r
+
+      -- 1.2 جدول ROOM (تم تعديله - أضفنا PrimaryType و بقى فيه كل البيانات)\r
+
+      CREATE TABLE ROOM (\r
+
+      \    RoomID           NUMBER(5) PRIMARY KEY,\r
+
+      \    WorkspaceID      NUMBER(5) NOT NULL,  -- كل غرفة تابعة لمساحة عمل
+      واحدة\r
+
+      \    RoomName         VARCHAR2(100) NOT NULL,\r
+
+      \    PrimaryType      VARCHAR2(10) NOT NULL,  -- 'Individual' أو 'Group'
+      (BR-01-001)\r
+
+      \    BaseHourlyPrice  NUMBER(10,2) NOT NULL,  -- السعر الأساسي للساعة\r
+
+      \    Capacity         NUMBER(3) NOT NULL,     -- السعة (1 للأفراد، أي رقم
+      للمجموعات)\r
+
+      \    IsActive         CHAR(1) DEFAULT 'Y' CHECK (IsActive IN ('Y',
+      'N')),\r
+
+      \    \r
+
+      \    -- قيود\r
+
+      \    CONSTRAINT CHK_Room_PrimaryType CHECK (PrimaryType IN ('Individual',
+      'Group')),\r
+
+      \    CONSTRAINT CHK_Room_Capacity CHECK (Capacity > 0),  -- السعة لازم
+      تكون أكبر من صفر\r
+
+      \    CONSTRAINT CHK_Room_Price CHECK (BaseHourlyPrice >= 0),\r
+
+      \    CONSTRAINT FK_Room_Workspace FOREIGN KEY (WorkspaceID) REFERENCES
+      WORKSPACE(WorkspaceID)\r
+
+      );\r
+
+      \r
+
+      -- 1.3 جدول AMENITY\r
+
+      CREATE TABLE AMENITY (\r
+
+      \    AmenityID        NUMBER(5) PRIMARY KEY,\r
+
+      \    AmenityName      VARCHAR2(100) NOT NULL,\r
+
+      \    Description      VARCHAR2(500)\r
+
+      );\r
+
+      \r
+
+      -- 1.4 جدول ROOM_AMENITY (علاقة M:M)\r
+
+      CREATE TABLE ROOM_AMENITY (\r
+
+      \    RoomID           NUMBER(5) NOT NULL,\r
+
+      \    AmenityID        NUMBER(5) NOT NULL,\r
+
+      \    CONSTRAINT PK_RoomAmenity PRIMARY KEY (RoomID, AmenityID),\r
+
+      \    CONSTRAINT FK_RA_Room FOREIGN KEY (RoomID) REFERENCES ROOM(RoomID),\r
+
+      \    CONSTRAINT FK_RA_Amenity FOREIGN KEY (AmenityID) REFERENCES
+      AMENITY(AmenityID)\r
+
+      );\r
+
+      \r
+
+      -- 1.5 جدول USER (عميل)\r
+
+      CREATE TABLE CUSTOMER_USER (\r
+
+      \    UserID           NUMBER(5) PRIMARY KEY,\r
+
+      \    FullName         VARCHAR2(100) NOT NULL,\r
+
+      \    PhoneNumber      VARCHAR2(20) NOT NULL,\r
+
+      \    Email            VARCHAR2(100),\r
+
+      \    CONSTRAINT UK_User_NamePhone UNIQUE (FullName, PhoneNumber)\r
+
+      );\r
+
+      \r
+
+      -- 1.6 جدول EMPLOYEE\r
+
+      CREATE TABLE EMPLOYEE (\r
+
+      \    EmployeeID       NUMBER(5) PRIMARY KEY,\r
+
+      \    FullName         VARCHAR2(100) NOT NULL,\r
+
+      \    PhoneNumber      VARCHAR2(20) NOT NULL,\r
+
+      \    Email            VARCHAR2(100),\r
+
+      \    Role             VARCHAR2(50),\r
+
+      \    IsActive         CHAR(1) DEFAULT 'Y' CHECK (IsActive IN ('Y', 'N'))\r
+
+      );\r
+
+      \r
+
+      -- 1.7 جدول SHIFT\r
+
+      CREATE TABLE SHIFT (\r
+
+      \    ShiftID          NUMBER(5) PRIMARY KEY,\r
+
+      \    EmployeeID       NUMBER(5) NOT NULL,\r
+
+      \    ShiftDate        DATE NOT NULL,\r
+
+      \    StartTime        DATE NOT NULL,\r
+
+      \    EndTime          DATE NOT NULL,\r
+
+      \    CONSTRAINT FK_Shift_Employee FOREIGN KEY (EmployeeID) REFERENCES
+      EMPLOYEE(EmployeeID),\r
+
+      \    CONSTRAINT CHK_ShiftTime CHECK (EndTime > StartTime)\r
+
+      );\r
+
+      \r
+
+      -- 1.8 جدول INDIVIDUAL_BOOKING (حجز فردي - تم التعديل)\r
+
+      -- ملاحظة: بقى مربوط بـ ROOM مباشرة وفيه PriceSnapshot من ROOM\r
+
+      CREATE TABLE INDIVIDUAL_BOOKING (\r
+
+      \    BookingID         NUMBER(10) PRIMARY KEY,\r
+
+      \    UserID            NUMBER(5) NOT NULL,\r
+
+      \    RoomID            NUMBER(5) NOT NULL,\r
+
+      \    ShiftID_Creation  NUMBER(5) NOT NULL,\r
+
+      \    ShiftID_CheckIn   NUMBER(5),\r
+
+      \    ShiftID_CheckOut  NUMBER(5),\r
+
+      \    EmpID_Creation    NUMBER(5) NOT NULL,\r
+
+      \    EmpID_CheckIn     NUMBER(5),\r
+
+      \    EmpID_CheckOut    NUMBER(5),\r
+
+      \    Channel           VARCHAR2(10) NOT NULL CHECK (Channel IN ('Online',
+      'Walk-In')),\r
+
+      \    Status            VARCHAR2(20) DEFAULT 'Pending' CHECK (Status IN
+      ('Pending', 'Checked-In', 'Checked-Out', 'Auto-Cancelled',
+      'Cancelled')),\r
+
+      \    PriceSnapshot     NUMBER(10,2) NOT NULL, -- بيتم نسخه من
+      ROOM.BaseHourlyPrice وقت الحجز\r
+
+      \    CreatedAt         DATE DEFAULT SYSDATE NOT NULL,\r
+
+      \    GracePeriodExpiry DATE,\r
+
+      \    CheckInTime       DATE,\r
+
+      \    CheckOutTime      DATE,\r
+
+      \    TotalAmount       NUMBER(10,2),\r
+
+      \    \r
+
+      \    -- المفاتيح الأجنبية\r
+
+      \    CONSTRAINT FK_IB_User FOREIGN KEY (UserID) REFERENCES
+      CUSTOMER_USER(UserID),\r
+
+      \    CONSTRAINT FK_IB_Room FOREIGN KEY (RoomID) REFERENCES ROOM(RoomID),\r
+
+      \    CONSTRAINT FK_IB_ShiftCreation FOREIGN KEY (ShiftID_Creation)
+      REFERENCES SHIFT(ShiftID),\r
+
+      \    CONSTRAINT FK_IB_ShiftCheckIn FOREIGN KEY (ShiftID_CheckIn)
+      REFERENCES SHIFT(ShiftID),\r
+
+      \    CONSTRAINT FK_IB_ShiftCheckOut FOREIGN KEY (ShiftID_CheckOut)
+      REFERENCES SHIFT(ShiftID),\r
+
+      \    CONSTRAINT FK_IB_EmpCreation FOREIGN KEY (EmpID_Creation) REFERENCES
+      EMPLOYEE(EmployeeID),\r
+
+      \    CONSTRAINT FK_IB_EmpCheckIn FOREIGN KEY (EmpID_CheckIn) REFERENCES
+      EMPLOYEE(EmployeeID),\r
+
+      \    CONSTRAINT FK_IB_EmpCheckOut FOREIGN KEY (EmpID_CheckOut) REFERENCES
+      EMPLOYEE(EmployeeID)\r
+
+      );\r
+
+      \r
+
+      -- 1.9 جدول GROUP_BOOKING (حجز جماعي)\r
+
+      CREATE TABLE GROUP_BOOKING (\r
+
+      \    GroupBookingID            NUMBER(10) PRIMARY KEY,\r
+
+      \    RoomID                    NUMBER(5) NOT NULL,\r
+
+      \    ShiftID_Creation          NUMBER(5) NOT NULL,\r
+
+      \    ShiftID_CheckIn           NUMBER(5),\r
+
+      \    EmpID_Creation            NUMBER(5) NOT NULL,\r
+
+      \    EmpID_CheckIn             NUMBER(5),\r
+
+      \    EmpID_CheckOut            NUMBER(5),\r
+
+      \    Channel                   VARCHAR2(10) NOT NULL CHECK (Channel IN
+      ('Online', 'Walk-In')),\r
+
+      \    Status                    VARCHAR2(30) DEFAULT 'Pending' CHECK
+      (Status IN ('Pending', 'Confirmed', 'Checked-In', 'Completed',
+      'Cancelled-Refunded', 'Cancelled-Forfeited', 'No-Show')),\r
+
+      \    PriceSnapshot             NUMBER(10,2) NOT NULL, -- نسخة من سعر
+      الغرفة لكل ساعة\r
+
+      \    ScheduledStart            DATE NOT NULL,\r
+
+      \    ScheduledEnd              DATE NOT NULL,\r
+
+      \    DepositAmount             NUMBER(10,2) NOT NULL,\r
+
+      \    DepositPaid               CHAR(1) DEFAULT 'N' CHECK (DepositPaid IN
+      ('Y', 'N')),\r
+
+      \    DepositPaidAt             DATE,\r
+
+      \    CancellationThresholdSnapshot NUMBER(2) NOT NULL,\r
+
+      \    ActualCheckIn             DATE,\r
+
+      \    ActualCheckOut            DATE,\r
+
+      \    TotalAmount               NUMBER(10,2),\r
+
+      \    TaxAmount                 NUMBER(10,2),\r
+
+      \    CreatedAt                 DATE DEFAULT SYSDATE NOT NULL,\r
+
+      \    \r
+
+      \    CONSTRAINT FK_GB_Room FOREIGN KEY (RoomID) REFERENCES ROOM(RoomID),\r
+
+      \    CONSTRAINT FK_GB_ShiftCreation FOREIGN KEY (ShiftID_Creation)
+      REFERENCES SHIFT(ShiftID),\r
+
+      \    CONSTRAINT FK_GB_ShiftCheckIn FOREIGN KEY (ShiftID_CheckIn)
+      REFERENCES SHIFT(ShiftID),\r
+
+      \    CONSTRAINT FK_GB_EmpCreation FOREIGN KEY (EmpID_Creation) REFERENCES
+      EMPLOYEE(EmployeeID),\r
+
+      \    CONSTRAINT FK_GB_EmpCheckIn FOREIGN KEY (EmpID_CheckIn) REFERENCES
+      EMPLOYEE(EmployeeID),\r
+
+      \    CONSTRAINT FK_GB_EmpCheckOut FOREIGN KEY (EmpID_CheckOut) REFERENCES
+      EMPLOYEE(EmployeeID),\r
+
+      \    CONSTRAINT CHK_GB_Times CHECK (ScheduledEnd > ScheduledStart)\r
+
+      );\r
+
+      \r
+
+      -- باقي الجداول (PAYMENT, LOST_FOUND, PRODUCT, STORE_ORDER, ORDER_ITEM) زي
+      ما هما\r
+
+      -- (هكتبهم مختصرين عشان المساحة)\r
+
+      \r
+
+      CREATE TABLE PAYMENT (\r
+
+      \    PaymentID         NUMBER(10) PRIMARY KEY,\r
+
+      \    BookingID         NUMBER(10) NOT NULL,\r
+
+      \    BookingType       VARCHAR2(10) NOT NULL CHECK (BookingType IN
+      ('Individual', 'Group')),\r
+
+      \    Amount            NUMBER(10,2) NOT NULL,\r
+
+      \    Method            VARCHAR2(15) NOT NULL CHECK (Method IN ('Cash',
+      'Credit Card', 'InstaPay')),\r
+
+      \    PaymentType       VARCHAR2(10) NOT NULL CHECK (PaymentType IN
+      ('Deposit', 'Balance', 'Full')),\r
+
+      \    PaidAt            DATE DEFAULT SYSDATE NOT NULL,\r
+
+      \    ProcessedByEmpID  NUMBER(5) NOT NULL,\r
+
+      \    IsRefunded        CHAR(1) DEFAULT 'N' CHECK (IsRefunded IN ('Y',
+      'N')),\r
+
+      \    RefundedAt        DATE,\r
+
+      \    RefundReason      VARCHAR2(500),\r
+
+      \    CONSTRAINT FK_Payment_Employee FOREIGN KEY (ProcessedByEmpID)
+      REFERENCES EMPLOYEE(EmployeeID)\r
+
+      );\r
+
+      \r
+
+      CREATE TABLE LOST_FOUND (\r
+
+      \    ItemID            NUMBER(10) PRIMARY KEY,\r
+
+      \    Description       VARCHAR2(500) NOT NULL,\r
+
+      \    RoomID            NUMBER(5) NOT NULL,\r
+
+      \    FoundAt           DATE DEFAULT SYSDATE NOT NULL,\r
+
+      \    LoggedByEmpID     NUMBER(5) NOT NULL,\r
+
+      \    Status            VARCHAR2(10) DEFAULT 'Found' CHECK (Status IN
+      ('Found', 'Stored', 'Claimed', 'Disposed')),\r
+
+      \    ClaimedByName     VARCHAR2(100),\r
+
+      \    ClaimedAt         DATE,\r
+
+      \    DisposalReason    VARCHAR2(500),\r
+
+      \    AuthorizingEmpID  NUMBER(5),\r
+
+      \    CONSTRAINT FK_LF_Room FOREIGN KEY (RoomID) REFERENCES ROOM(RoomID),\r
+
+      \    CONSTRAINT FK_LF_LoggedBy FOREIGN KEY (LoggedByEmpID) REFERENCES
+      EMPLOYEE(EmployeeID),\r
+
+      \    CONSTRAINT FK_LF_AuthorizedBy FOREIGN KEY (AuthorizingEmpID)
+      REFERENCES EMPLOYEE(EmployeeID)\r
+
+      );\r
+
+      \r
+
+      CREATE TABLE PRODUCT (\r
+
+      \    ProductID        NUMBER(5) PRIMARY KEY,\r
+
+      \    ProductName      VARCHAR2(100) NOT NULL,\r
+
+      \    Description      VARCHAR2(500),\r
+
+      \    Price            NUMBER(10,2) NOT NULL,\r
+
+      \    StockQuantity    NUMBER(5) DEFAULT 0 NOT NULL,\r
+
+      \    IsActive         CHAR(1) DEFAULT 'Y' CHECK (IsActive IN ('Y', 'N'))\r
+
+      );\r
+
+      \r
+
+      CREATE TABLE STORE_ORDER (\r
+
+      \    OrderID           NUMBER(10) PRIMARY KEY,\r
+
+      \    Channel           VARCHAR2(10) NOT NULL CHECK (Channel IN ('Online',
+      'On-Site')),\r
+
+      \    OrderedAt         DATE DEFAULT SYSDATE NOT NULL,\r
+
+      \    TotalAmount       NUMBER(10,2) NOT NULL,\r
+
+      \    PaymentMethod     VARCHAR2(15) NOT NULL CHECK (PaymentMethod IN
+      ('Cash', 'Credit Card', 'InstaPay')),\r
+
+      \    UserID            NUMBER(5),\r
+
+      \    CustomerName      VARCHAR2(100),\r
+
+      \    CustomerPhone     VARCHAR2(20),\r
+
+      \    ProcessedByEmpID  NUMBER(5),\r
+
+      \    CONSTRAINT FK_SO_User FOREIGN KEY (UserID) REFERENCES
+      CUSTOMER_USER(UserID),\r
+
+      \    CONSTRAINT FK_SO_Employee FOREIGN KEY (ProcessedByEmpID) REFERENCES
+      EMPLOYEE(EmployeeID)\r
+
+      );\r
+
+      \r
+
+      CREATE TABLE ORDER_ITEM (\r
+
+      \    OrderID           NUMBER(10) NOT NULL,\r
+
+      \    ProductID         NUMBER(5) NOT NULL,\r
+
+      \    Quantity          NUMBER(3) NOT NULL CHECK (Quantity > 0),\r
+
+      \    UnitPriceSnapshot NUMBER(10,2) NOT NULL,\r
+
+      \    CONSTRAINT PK_OrderItem PRIMARY KEY (OrderID, ProductID),\r
+
+      \    CONSTRAINT FK_OI_Order FOREIGN KEY (OrderID) REFERENCES
+      STORE_ORDER(OrderID),\r
+
+      \    CONSTRAINT FK_OI_Product FOREIGN KEY (ProductID) REFERENCES
+      PRODUCT(ProductID)\r
+
+      );\r
+
+      \r
+
+      -- ============================================================\r
+
+      -- 2. الـ Sequences\r
+
+      -- ============================================================\r
+
+      \r
+
+      CREATE SEQUENCE SEQ_WORKSPACE START WITH 1 INCREMENT BY 1;\r
+
+      CREATE SEQUENCE SEQ_ROOM START WITH 1 INCREMENT BY 1;\r
+
+      CREATE SEQUENCE SEQ_AMENITY START WITH 1 INCREMENT BY 1;\r
+
+      CREATE SEQUENCE SEQ_USER START WITH 1 INCREMENT BY 1;\r
+
+      CREATE SEQUENCE SEQ_EMPLOYEE START WITH 1 INCREMENT BY 1;\r
+
+      CREATE SEQUENCE SEQ_SHIFT START WITH 1 INCREMENT BY 1;\r
+
+      CREATE SEQUENCE SEQ_INDIV_BOOKING START WITH 1000 INCREMENT BY 1;\r
+
+      CREATE SEQUENCE SEQ_GROUP_BOOKING START WITH 1000 INCREMENT BY 1;\r
+
+      CREATE SEQUENCE SEQ_PAYMENT START WITH 1000 INCREMENT BY 1;\r
+
+      CREATE SEQUENCE SEQ_LOST_FOUND START WITH 1 INCREMENT BY 1;\r
+
+      CREATE SEQUENCE SEQ_PRODUCT START WITH 1 INCREMENT BY 1;\r
+
+      CREATE SEQUENCE SEQ_STORE_ORDER START WITH 5000 INCREMENT BY 1;\r
+
+      \r
+
+      -- ============================================================\r
+
+      -- 3. بيانات تجريبية (INSERT)\r
+
+      -- ============================================================\r
+
+      \r
+
+      -- إضافة WORKSPACE\r
+
+      INSERT INTO WORKSPACE (WorkspaceID, WorkspaceName, GracePeriodMinutes,
+      CancellationThresholdHours, DepositRatePercent, TaxRatePercent,
+      DepositPaymentWindowMinutes)\r
+
+      VALUES (SEQ_WORKSPACE.NEXTVAL, 'مكتبة الإسكندرية للمساحات المشتركة', 30,
+      2, 25, 14.00, 15);\r
+
+      \r
+
+      INSERT INTO WORKSPACE (WorkspaceID, WorkspaceName, GracePeriodMinutes,
+      CancellationThresholdHours, DepositRatePercent, TaxRatePercent,
+      DepositPaymentWindowMinutes)\r
+
+      VALUES (SEQ_WORKSPACE.NEXTVAL, 'مجمع الأعمال - برج القاهرة', 45, 4, 25,
+      14.00, 20);\r
+
+      \r
+
+      -- إضافة ROOM (من غير RoomType - بقى PrimaryType جوا الجدول)\r
+
+      INSERT INTO ROOM (RoomID, WorkspaceID, RoomName, PrimaryType,
+      BaseHourlyPrice, Capacity, IsActive)\r
+
+      VALUES (SEQ_ROOM.NEXTVAL, 1, 'غرفة A101 - هادئة', 'Individual', 50.00, 1,
+      'Y');\r
+
+      \r
+
+      INSERT INTO ROOM (RoomID, WorkspaceID, RoomName, PrimaryType,
+      BaseHourlyPrice, Capacity, IsActive)\r
+
+      VALUES (SEQ_ROOM.NEXTVAL, 1, 'غرفة B202 - اجتماعات', 'Group', 150.00, 6,
+      'Y');\r
+
+      \r
+
+      INSERT INTO ROOM (RoomID, WorkspaceID, RoomName, PrimaryType,
+      BaseHourlyPrice, Capacity, IsActive)\r
+
+      VALUES (SEQ_ROOM.NEXTVAL, 2, 'مكتب 10 - خاص', 'Individual', 75.00, 1,
+      'Y');\r
+
+      \r
+
+      INSERT INTO ROOM (RoomID, WorkspaceID, RoomName, PrimaryType,
+      BaseHourlyPrice, Capacity, IsActive)\r
+
+      VALUES (SEQ_ROOM.NEXTVAL, 2, 'قاعة C - مؤتمرات', 'Group', 300.00, 20,
+      'Y');\r
+
+      \r
+
+      -- إضافة EMPLOYEE\r
+
+      INSERT INTO EMPLOYEE (EmployeeID, FullName, PhoneNumber, Email, Role,
+      IsActive)\r
+
+      VALUES (SEQ_EMPLOYEE.NEXTVAL, 'أحمد محمد', '01001234567',
+      'ahmed@cowork.com', 'مدير العمليات', 'Y');\r
+
+      \r
+
+      INSERT INTO EMPLOYEE (EmployeeID, FullName, PhoneNumber, Email, Role,
+      IsActive)\r
+
+      VALUES (SEQ_EMPLOYEE.NEXTVAL, 'سارة خالد', '01007654321',
+      'sara@cowork.com', 'موظف استقبال', 'Y');\r
+
+      \r
+
+      -- إضافة SHIFT\r
+
+      INSERT INTO SHIFT (ShiftID, EmployeeID, ShiftDate, StartTime, EndTime)\r
+
+      VALUES (SEQ_SHIFT.NEXTVAL, 1, TO_DATE('2026-05-10', 'YYYY-MM-DD'),
+      TO_DATE('2026-05-10 09:00:00', 'YYYY-MM-DD HH24:MI:SS'),
+      TO_DATE('2026-05-10 17:00:00', 'YYYY-MM-DD HH24:MI:SS'));\r
+
+      \r
+
+      -- إضافة USER\r
+
+      INSERT INTO CUSTOMER_USER (UserID, FullName, PhoneNumber, Email)\r
+
+      VALUES (SEQ_USER.NEXTVAL, 'محمود علي', '0122112233',
+      'mahmoud@email.com');\r
+
+      \r
+
+      -- إضافة AMENITY وربطها بالغرف\r
+
+      INSERT INTO AMENITY (AmenityID, AmenityName, Description) VALUES
+      (SEQ_AMENITY.NEXTVAL, 'واي فاي', 'إنترنت عالي السرعة');\r
+
+      INSERT INTO AMENITY (AmenityID, AmenityName, Description) VALUES
+      (SEQ_AMENITY.NEXTVAL, 'طابعة', 'طابعة متعددة الوظائف');\r
+
+      INSERT INTO AMENITY (AmenityID, AmenityName, Description) VALUES
+      (SEQ_AMENITY.NEXTVAL, 'بلاي ستيشن 5', 'جهاز ألعاب');\r
+
+      \r
+
+      INSERT INTO ROOM_AMENITY (RoomID, AmenityID) VALUES (1, 1);\r
+
+      INSERT INTO ROOM_AMENITY (RoomID, AmenityID) VALUES (1, 2);\r
+
+      INSERT INTO ROOM_AMENITY (RoomID, AmenityID) VALUES (2, 1);\r
+
+      INSERT INTO ROOM_AMENITY (RoomID, AmenityID) VALUES (3, 1);\r
+
+      INSERT INTO ROOM_AMENITY (RoomID, AmenityID) VALUES (4, 1);\r
+
+      INSERT INTO ROOM_AMENITY (RoomID, AmenityID) VALUES (4, 3);\r
+
+      \r
+
+      -- حجز فردي تجريبي\r
+
+      INSERT INTO INDIVIDUAL_BOOKING (BookingID, UserID, RoomID,
+      ShiftID_Creation, EmpID_Creation, Channel, Status, PriceSnapshot,
+      CreatedAt, GracePeriodExpiry)\r
+
+      VALUES (SEQ_INDIV_BOOKING.NEXTVAL, 1, 1, 1, 1, 'Online', 'Pending', 50.00,
+      SYSDATE, SYSDATE + 30/1440);\r
+
+      \r
+
+      -- حجز جماعي تجريبي\r
+
+      INSERT INTO GROUP_BOOKING (GroupBookingID, RoomID, ShiftID_Creation,
+      EmpID_Creation, Channel, Status, PriceSnapshot, ScheduledStart,
+      ScheduledEnd, DepositAmount, CancellationThresholdSnapshot, CreatedAt)\r
+
+      VALUES (SEQ_GROUP_BOOKING.NEXTVAL, 2, 1, 1, 'Online', 'Pending', 150.00,
+      \r
+
+      \        TO_DATE('2026-05-15 14:00:00', 'YYYY-MM-DD HH24:MI:SS'), \r
+
+      \        TO_DATE('2026-05-15 16:00:00', 'YYYY-MM-DD HH24:MI:SS'),\r
+
+      \        75.00, 2, SYSDATE);\r
+
+      \r
+
+      -- منتجات ومتجر\r
+
+      INSERT INTO PRODUCT (ProductID, ProductName, Price, StockQuantity,
+      IsActive) \r
+
+      VALUES (SEQ_PRODUCT.NEXTVAL, 'قهوة عربية', 15.00, 50, 'Y');\r
+
+      \r
+
+      INSERT INTO STORE_ORDER (OrderID, Channel, TotalAmount, PaymentMethod,
+      UserID, ProcessedByEmpID)\r
+
+      VALUES (SEQ_STORE_ORDER.NEXTVAL, 'On-Site', 15.00, 'Cash', 1, 2);\r
+
+      \r
+
+      INSERT INTO ORDER_ITEM (OrderID, ProductID, Quantity, UnitPriceSnapshot)\r
+
+      VALUES (SEQ_STORE_ORDER.CURRVAL, 1, 1, 15.00);\r
+
+      \r
+
+      COMMIT;\r
+
+      \r
+
+      -- ============================================================\r
+
+      -- 4. استعلامات للعرض (SELECTs)\r
+
+      -- ============================================================\r
+
+      \r
+
+      -- عرض جميع الغرف مع نوعها مباشرة\r
+
+      SELECT RoomID, RoomName, PrimaryType, BaseHourlyPrice, Capacity,
+      IsActive\r
+
+      FROM ROOM\r
+
+      ORDER BY PrimaryType, RoomName;\r
+
+      \r
+
+      -- عرض الغرف الفردية فقط\r
+
+      SELECT RoomName, BaseHourlyPrice\r
+
+      FROM ROOM\r
+
+      WHERE PrimaryType = 'Individual' AND IsActive = 'Y';\r
+
+      \r
+
+      -- عرض الغرف الجماعية فقط\r
+
+      SELECT RoomName, Capacity, BaseHourlyPrice\r
+
+      FROM ROOM\r
+
+      WHERE PrimaryType = 'Group' AND IsActive = 'Y';\r
+
+      \r
+
+      -- عرض كل غرفة مع المرافق بتاعتها\r
+
+      SELECT R.RoomName, R.PrimaryType, \r
+
+      \       LISTAGG(A.AmenityName, ', ') WITHIN GROUP (ORDER BY A.AmenityName)
+      AS Amenities\r
+
+      FROM ROOM R\r
+
+      JOIN ROOM_AMENITY RA ON R.RoomID = RA.RoomID\r
+
+      JOIN AMENITY A ON RA.AmenityID = A.AmenityID\r
+
+      GROUP BY R.RoomName, R.PrimaryType;\r
+
+      \r
+
+      -- عرض الحجوزات الفردية النشطة\r
+
+      SELECT IB.BookingID, CU.FullName, R.RoomName, IB.Status, IB.Channel\r
+
+      FROM INDIVIDUAL_BOOKING IB\r
+
+      JOIN CUSTOMER_USER CU ON IB.UserID = CU.UserID\r
+
+      JOIN ROOM R ON IB.RoomID = R.RoomID\r
+
+      WHERE IB.Status IN ('Pending', 'Checked-In');\r
+
+      \r
+
+      -- عرض الحجوزات الجماعية\r
+
+      SELECT GB.GroupBookingID, R.RoomName, R.Capacity, \r
+
+      \       GB.ScheduledStart, GB.ScheduledEnd, GB.Status\r
+
+      FROM GROUP_BOOKING GB\r
+
+      JOIN ROOM R ON GB.RoomID = R.RoomID;"
+    languageId: oracle-sql
